@@ -1,75 +1,138 @@
 use axum::{
-    routing::post,
-    http::StatusCode,
-    response::IntoResponse,
-    Json, Router,
+    extract::Json, http::StatusCode, response::IntoResponse, routing::get, routing::post, Router,
 };
+use dotenv::dotenv;
+use ethers::prelude::*;
+// use hyper::Server;
+// use axum::server::Server;
 use serde::{Deserialize, Serialize};
-use web3::transports::Http;
-use web3::types::{Address, U256, TransactionRequest};
-use web3::Web3;
-use tokio::main;
+use std::env;
+use std::net::SocketAddr;
+use std::result::Result as StdResult;
+use std::str::FromStr;
+use thiserror::Error;
 
-///
-/// Avalanche Fuji测试网: https://api.avax-test.network/ext/bc/C/rpc
-#[main]
-async fn main() {
-    // 初始化日志
-    tracing_subscriber::fmt::init();
-
-    // 构建路由
-    let app = Router::new()
-        .route("/claim", post(claim));
-
-    // 初始化监听器
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-        .await
-        .unwrap();
-    tracing::debug!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+#[derive(Debug, Serialize, Deserialize)]
+struct TransferRes {
+    success: bool,
+    tx_id: String,
+    explorer_url: String,
 }
 
-async fn claim(Json(param): Json<Claim>) -> impl IntoResponse {
-    let transport = Http::new(&param.rpc).unwrap();
-    let web3 = Web3::new(transport);
-    
-    let address: Address = param.address.parse().unwrap();
-    let amount = U256::from(param.amount);
+#[derive(Debug, Serialize, Deserialize)]
+struct TransferPost {
+    address: String,
+    network: String,
+    amount: String,
+}
 
-    let tx_object = TransactionRequest {
-        from: param.from.parse().unwrap(), // 从请求参数中获取发送地址
-        to: Some(address),
-        gas: Some(21000.into()), // 设置 gas limit
-        gas_price: Some(web3.eth().gas_price().await.unwrap()), // 设置 gas price
-        value: Some(amount),
-        data: None,
-        nonce: None,
-        condition: None,
-    };
+#[derive(Debug, Serialize, Deserialize)]
+struct TransferErrorRes {
+    success: bool,
+    message: String,
+}
 
-    match web3.eth().send_transaction(tx_object).await {
-        Ok(tx_hash) => {
-            (StatusCode::OK, Json(ClaimRes { hash: format!("{:?}", tx_hash) }))
-        }
-        Err(err) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(ClaimRes { hash: format!("Error: {:?}", err) }))
-        }
+#[derive(Debug, Error)]
+enum TransferError {
+    #[error("Network connection error: {0}")]
+    NetworkError(String),
+    #[error("Invalid private key: {0}")]
+    InvalidPrivateKey(String),
+    #[error("Failed to get asset balance: {0}")]
+    GetBalanceError(String),
+    #[error("Invalid amount format: {0}")]
+    InvalidAmountFormat(String),
+    #[error("Invalid receiver address: {0}")]
+    InvalidReceiverAddress(String),
+    #[error("Transaction failed: {0}")]
+    TransactionError(String),
+}
+
+impl IntoResponse for TransferError {
+    fn into_response(self) -> axum::response::Response {
+        let message = self.to_string();
+        let error_res = TransferErrorRes {
+            success: false,
+            message,
+        };
+        let json = axum::Json(error_res);
+        (StatusCode::INTERNAL_SERVER_ERROR, json).into_response()
     }
 }
 
-///
-/// 参数结构体
-#[derive(Deserialize)]
-struct Claim {
-    rpc: String,
-    from: String, // 添加发送地址字段
-    address: String,
-    amount: u64
+async fn transfer(data: Json<TransferPost>) -> StdResult<Json<TransferRes>, TransferError> {
+    // Load the private key from the environment
+    let key = env::var("KEY").expect("KEY 未设置");
+
+    // Setup the provider
+    let provider = Provider::<Http>::try_from(&data.network)
+        .map_err(|err| TransferError::NetworkError(err.to_string()))?;
+
+    // Setup the wallet
+    let wallet = LocalWallet::from_str(&key)
+        .map_err(|err| TransferError::InvalidPrivateKey(err.to_string()))?;
+    let wallet = wallet.with_chain_id(1u64); // You might want to adjust the chain ID
+
+    // Get the balance
+    let _balance = provider
+        .get_balance(wallet.address(), None)
+        .await
+        .map_err(|err| TransferError::GetBalanceError(err.to_string()))?;
+
+    // Parse the amount
+    // Parse the amount
+    let amount = U256::from_dec_str(&data.amount)
+        .map_err(|err| TransferError::InvalidAmountFormat(err.to_string()))?;
+
+    // Parse the receiver address
+    let receiver = Address::from_str(&data.address)
+        .map_err(|err| TransferError::InvalidReceiverAddress(err.to_string()))?;
+
+    // Create and sign the transaction
+    let tx = TransactionRequest::new()
+        .to(receiver)
+        .value(amount)
+        .from(wallet.address());
+
+    let pending_tx = provider
+        .send_transaction(tx, None)
+        .await
+        .map_err(|err| TransferError::TransactionError(err.to_string()))?;
+
+    let tx_hash = pending_tx.tx_hash();
+
+    // Wait for the transaction to be mined
+    let _receipt = pending_tx
+        .await
+        .map_err(|err| TransferError::TransactionError(err.to_string()))?;
+
+    // Respond with the transaction ID
+    Ok(Json(TransferRes {
+        success: true,
+        tx_id: format!("{:?}", tx_hash),
+        explorer_url: explorer_url(&format!("{:?}", tx_hash)),
+    }))
 }
 
-///
-/// 响应结构体
-#[derive(Serialize)]
-struct ClaimRes {
-    hash: String
+fn explorer_url(tx_id: &str) -> String {
+    let base_url = "https://snowtrace.io/tx/"; // Adjust to the appropriate Avalanche explorer URL
+    format!("{}{}", base_url, tx_id)
+}
+
+#[tokio::main]
+async fn main() {
+    dotenv().ok();
+
+    let app = Router::new()
+        .route("/", get(|| async { "Hello, World!" }))
+        .route("/avalanche/request", post(transfer));
+
+    let port = env::var("PORT").unwrap_or_else(|_| "6007".to_string());
+    let port: u16 = port.parse().expect("Invalid port number");
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
