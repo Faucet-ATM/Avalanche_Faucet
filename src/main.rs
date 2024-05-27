@@ -3,13 +3,13 @@ use axum::{
 };
 use dotenv::dotenv;
 use ethers::prelude::*;
-// use hyper::Server;
-// use axum::server::Server;
+use rust_decimal::prelude::{FromStr, ToPrimitive};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::net::SocketAddr;
 use std::result::Result as StdResult;
-use std::str::FromStr;
+
 use thiserror::Error;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,10 +79,20 @@ async fn transfer(data: Json<TransferPost>) -> StdResult<Json<TransferRes>, Tran
         .await
         .map_err(|err| TransferError::GetBalanceError(err.to_string()))?;
 
-    // Parse the amount
-    // Parse the amount
-    let amount = U256::from_dec_str(&data.amount)
-        .map_err(|err| TransferError::InvalidAmountFormat(err.to_string()))?;
+    // Parse the amount as Decimal
+    let amount_str = &data.amount;
+    let precision: u32 = 18; // or any other precision value based on the token
+
+    let amount = Decimal::from_str(amount_str)
+        .map_err(|_| TransferError::InvalidAmountFormat("Failed to parse amount".to_string()))?;
+
+    let multiplier = Decimal::new(10u64.pow(precision).try_into().unwrap(), 0);
+    let result = amount * multiplier;
+
+    let smallest_unit_int = result.to_u64().ok_or_else(|| {
+        TransferError::InvalidAmountFormat("Failed to convert to integer".to_string())
+    })?;
+    println!("Amount in smallest unit: {}", smallest_unit_int);
 
     // Parse the receiver address
     let receiver = Address::from_str(&data.address)
@@ -91,7 +101,7 @@ async fn transfer(data: Json<TransferPost>) -> StdResult<Json<TransferRes>, Tran
     // Create and sign the transaction
     let tx = TransactionRequest::new()
         .to(receiver)
-        .value(amount)
+        .value(U256::from(smallest_unit_int))
         .from(wallet.address());
 
     let pending_tx = provider
