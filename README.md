@@ -21,18 +21,26 @@
 请求示例：
 
 ```json
+//URL: /request
+//方法： POST
+//请求体: 
 {
-    "rpc": "https://api.avax-test.network/ext/bc/C/rpc",
-    "address": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "amount": 1000000
+"network": "xxx", // 要用于交易的网络
+"address": "0xRecipientAddress" // 钱包地址
 }
+
+
 ```
 
 返回示例：
 
 ```json
 {
-    "hash": "xxxxxx8G5cL3Rrv4zbCP95tfgnZ1irieZa8k5y8LwkL9YUpzkwXQnLnWXbNNAZL7WsHiWZHzmyY67HWbhkdxxxxxx"
+"success": true, // 领水是否成功
+“tx_id”: "0x交易哈希", 
+“explorer_url”: “...” //对应区块链浏览器地址
 }
 ```
+
+
 
