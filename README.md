@@ -26,7 +26,8 @@
 //请求体: 
 {
 "network": "xxx", // 要用于交易的网络
-"address": "0xRecipientAddress" // 钱包地址
+"address": "0xRecipientAddress", // 钱包地址
+"amount":0   //数量
 }
 
 
