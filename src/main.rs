@@ -11,7 +11,6 @@ use std::net::SocketAddr;
 use std::result::Result as StdResult;
 
 use thiserror::Error;
-
 #[derive(Debug, Serialize, Deserialize)]
 struct TransferRes {
     success: bool,
