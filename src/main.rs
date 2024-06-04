@@ -124,7 +124,7 @@ async fn transfer(data: Json<TransferPost>) -> StdResult<Json<TransferRes>, Tran
 }
 
 fn explorer_url(tx_id: &str) -> String {
-    let base_url = "https://snowtrace.io/tx/"; // Adjust to the appropriate Avalanche explorer URL
+    let base_url = "https://cchain.explorer.avax-test.network/"; // Adjust to the appropriate Avalanche explorer URL
     format!("{}{}", base_url, tx_id)
 }
 

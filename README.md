@@ -39,7 +39,7 @@
 {
 "success": true, // 领水是否成功
 “tx_id”: "0x交易哈希", 
-“explorer_url”: “...” //对应区块链浏览器地址
+“explorer_url”: “https://cchain.explorer.avax-test.network” //对应区块链浏览器地址
 }
 ```
 
